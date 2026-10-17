@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AfrOSINT | 3D Earth</title><style>
+:root{color-scheme:dark;font-family:system-ui,Arial,sans-serif}*{box-sizing:border-box}body{margin:0;background:#03080e;color:#dcecf3;overflow:hidden}#globe{position:fixed;inset:0}header{position:absolute;z-index:2;top:20px;left:24px;pointer-events:none}h1{font-size:17px;letter-spacing:.22em;margin:0;color:#f0f8ff}small{color:#77b5ca;letter-spacing:.12em}aside{position:absolute;bottom:22px;left:24px;z-index:2;background:#07151bd9;border:1px solid #1b4b58;border-radius:10px;padding:14px;max-width:min(330px,calc(100vw - 48px))}button{background:#123442;color:#d7f5ff;border:1px solid #346575;border-radius:6px;padding:8px 12px;cursor:pointer;margin:4px 4px 0 0}button:hover{background:#215267}#status{font-size:12px;color:#b5ced8;line-height:1.5}#error{color:#ffb4aa}footer{position:absolute;right:20px;bottom:20px;color:#7396a2;font-size:11px;pointer-events:none}@media(max-width:600px){header{top:12px;left:14px}aside{left:12px;bottom:12px}footer{display:none}}</style></head><body>
+<div id="globe" aria-label="Interactive three-dimensional globe"></div><header><h1>AFROSINT / EARTH</h1><small>GEOSPATIAL INTELLIGENCE · DEMO</small></header><aside><div id="status" role="status">Drag to rotate · Scroll to zoom · Select a marker</div><div id="error" role="alert"></div><button id="reset">Focus Africa</button><button id="spin">Pause rotation</button></aside><footer>THREE.JS · DEMONSTRATION LOCATIONS ONLY</footer>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js';
+const mount=document.querySelector('#globe'),status=document.querySelector('#status'),error=document.querySelector('#error');
+try{
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x03080e);
+const camera=new THREE.PerspectiveCamera(42,innerWidth/innerHeight,.1,100);camera.position.set(0,0,3.65);
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:false});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);renderer.outputColorSpace=THREE.SRGBColorSpace;mount.appendChild(renderer.domElement);
+scene.add(new THREE.AmbientLight(0x8caccd,1.45));const sun=new THREE.DirectionalLight(0xffffff,2.6);sun.position.set(-3,2,5);scene.add(sun);
+const earthGroup=new THREE.Group();scene.add(earthGroup);
+const sphere=new THREE.Mesh(new THREE.SphereGeometry(1,96,64),new THREE.MeshPhongMaterial({color:0x567c91,shininess:9}));earthGroup.add(sphere);
+const texture=new THREE.TextureLoader();texture.load('https://threejs.org/examples/textures/planets/earth_atmos_2048.jpg',t=>{t.colorSpace=THREE.SRGBColorSpace;sphere.material.map=t;sphere.material.color.set(0xffffff);sphere.material.needsUpdate=true;},undefined,()=>{error.textContent='Earth imagery unavailable; using fallback globe.'});
+const glow=new THREE.Mesh(new THREE.SphereGeometry(1.055,64,48),new THREE.MeshBasicMaterial({color:0x1b8bb5,transparent:true,opacity:.075,side:THREE.BackSide}));earthGroup.add(glow);
+const starsGeometry=new THREE.BufferGeometry(),points=[];for(let i=0;i<1100;i++){const r=12+Math.random()*25,a=Math.random()*Math.PI*2,z=Math.random()*2-1;points.push(r*Math.sqrt(1-z*z)*Math.cos(a),r*z,r*Math.sqrt(1-z*z)*Math.sin(a))}starsGeometry.setAttribute('position',new THREE.Float32BufferAttribute(points,3));scene.add(new THREE.Points(starsGeometry,new THREE.PointsMaterial({color:0x88b9d2,size:.035,sizeAttenuation:true})));
+function coords(lat,lon,r=1.016){const p=(90-lat)*Math.PI/180,t=(lon+180)*Math.PI/180;return new THREE.Vector3(-r*Math.sin(p)*Math.cos(t),r*Math.cos(p),r*Math.sin(p)*Math.sin(t))}
+const places=[['Lagos, Nigeria',6.45,3.4],['Accra, Ghana',5.56,-.2],['Nairobi, Kenya',-1.29,36.82],['Cairo, Egypt',30.04,31.24],['Johannesburg, South Africa',-26.2,28.05]];
+const markers=[];for(const [name,lat,lon] of places){const m=new THREE.Mesh(new THREE.SphereGeometry(.018,12,12),new THREE.MeshBasicMaterial({color:0x33efff}));m.position.copy(coords(lat,lon));m.userData.name=name;earthGroup.add(m);markers.push(m)}
+earthGroup.rotation.y=-.35;earthGroup.rotation.x=.12;
+let dragging=false,lastX=0,lastY=0,moved=false,spin=true;const canvas=renderer.domElement;
+canvas.addEventListener('pointerdown',e=>{dragging=true;moved=false;lastX=e.clientX;lastY=e.clientY;canvas.setPointerCapture(e.pointerId)});
+canvas.addEventListener('pointermove',e=>{if(!dragging)return;const dx=e.clientX-lastX,dy=e.clientY-lastY;if(Math.abs(dx)+Math.abs(dy)>2)moved=true;earthGroup.rotation.y+=dx*.005;earthGroup.rotation.x=Math.max(-1.35,Math.min(1.35,earthGroup.rotation.x+dy*.005));lastX=e.clientX;lastY=e.clientY});
+canvas.addEventListener('pointerup',e=>{dragging=false;if(moved)return;const pointer=new THREE.Vector2(e.clientX/innerWidth*2-1,-e.clientY/innerHeight*2+1),ray=new THREE.Raycaster();ray.setFromCamera(pointer,camera);const hits=ray.intersectObjects(markers);if(hits.length)status.textContent='Selected: '+hits[0].object.userData.name+' · Demonstration marker'});
+canvas.addEventListener('wheel',e=>{e.preventDefault();camera.position.z=Math.max(1.7,Math.min(7,camera.position.z+e.deltaY*.003))},{passive:false});
+document.querySelector('#reset').onclick=()=>{earthGroup.rotation.set(.12,-.35,0);camera.position.z=3.65;status.textContent='Africa focus restored'};
+document.querySelector('#spin').onclick=e=>{spin=!spin;e.currentTarget.textContent=spin?'Pause rotation':'Resume rotation'};
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+renderer.setAnimationLoop(()=>{if(spin&&!dragging)earthGroup.rotation.y+=.0007;renderer.render(scene,camera)});
+}catch(e){error.textContent='Unable to initialise 3D view: '+e.message;console.error(e)}
+</script></body></html>
