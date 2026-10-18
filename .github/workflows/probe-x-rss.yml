@@ -1,0 +1,17 @@
+name: Probe free X RSS feeds
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/probe_x_rss.py'
+      - '.github/workflows/probe-x-rss.yml'
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check RSS endpoints
+        run: python3 scripts/probe_x_rss.py
