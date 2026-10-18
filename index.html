@@ -36,24 +36,46 @@ function compactNumber(value){if(value===null||value===undefined||!Number.isFini
 function field(label,value){const el=document.createElement('div');el.className='intel-field';const key=document.createElement('span'),data=document.createElement('b');key.textContent=label;data.textContent=value??'Unavailable';el.append(key,data);return el}
 function note(text){const p=document.createElement('p');p.className='intel-note';p.textContent=text;return p}
 async function worldBank(iso,indicator){if(!iso||!/^[A-Z]{3}$/.test(iso))return null;const res=await fetch('https://api.worldbank.org/v2/country/'+iso+'/indicator/'+indicator+'?format=json&per_page=15',{signal:AbortSignal.timeout(9000)});if(!res.ok)throw Error('World Bank unavailable');const data=await res.json();return Array.isArray(data?.[1])?data[1].find(item=>item.value!==null)??null:null}
+let countryDirectoryPromise=null;
+async function backupCountryDirectory(){
+if(!countryDirectoryPromise)countryDirectoryPromise=fetch('https://raw.githubusercontent.com/mledoze/countries/master/countries.json',{signal:AbortSignal.timeout(12000)}).then(r=>{if(!r.ok)throw Error('Backup directory HTTP '+r.status);return r.json()}).catch(e=>{countryDirectoryPromise=null;throw e});
+return countryDirectoryPromise
+}
+async function bankCountryMetadata(code){
+const r=await fetch('https://api.worldbank.org/v2/country/'+encodeURIComponent(code)+'?format=json',{signal:AbortSignal.timeout(9000)});
+if(!r.ok)throw Error('World Bank country metadata unavailable');
+const data=await r.json();return data?.[1]?.[0]||null
+}
 async function loadProfile(c){
 const key=c.name.toLowerCase();if(profileCache.has(key))return profileCache.get(key);
 let code=/^[A-Z]{3}$/.test(c.iso3||'')?c.iso3:null,basic=null,metrics=[null,null],errors=[];
 const fields='name,capital,region,subregion,currencies,cca3';
 try{
-let response=code?await fetch('https://restcountries.com/v3.1/alpha/'+encodeURIComponent(code)+'?fields='+fields,{signal:AbortSignal.timeout(9000)}):null;
-if(!response?.ok){response=await fetch('https://restcountries.com/v3.1/name/'+encodeURIComponent(c.name)+'?fullText=true&fields='+fields,{signal:AbortSignal.timeout(9000)})}
-if(!response.ok)throw Error('Country directory returned '+response.status);
-const result=await response.json();basic=Array.isArray(result)?result[0]:result;code=basic?.cca3||code;
-if(!basic?.name)throw Error('Invalid country directory response');
-}catch(e){errors.push('Country details: '+e.message)}
+let response=code?await fetch('https://restcountries.com/v3.1/alpha/'+encodeURIComponent(code)+'?fields='+fields,{signal:AbortSignal.timeout(7000)}):null;
+if(!response?.ok)response=await fetch('https://restcountries.com/v3.1/name/'+encodeURIComponent(c.name)+'?fullText=true&fields='+fields,{signal:AbortSignal.timeout(7000)});
+if(!response.ok)throw Error('Primary directory HTTP '+response.status);
+const result=await response.json();basic=Array.isArray(result)?result[0]:result;
+if(!basic?.name||(!basic.capital&&!basic.region&&!basic.currencies))throw Error('Primary directory returned incomplete data');
+code=basic.cca3||code;
+}catch(e){errors.push('Primary country directory unavailable')}
+if(!basic){
+try{
+const countries=await backupCountryDirectory();
+basic=countries.find(item=>(code&&item.cca3===code)||(c.iso2&&item.cca2===c.iso2)||item.name?.common?.toLowerCase()===key||item.name?.official?.toLowerCase()===key)||null;
+if(basic)code=basic.cca3||code;
+else errors.push('Country missing from backup directory');
+}catch(e){errors.push('Backup country directory unavailable')}
+}
+let bankMeta=null;
 if(code&&/^[A-Z]{3}$/.test(code)){
-const results=await Promise.allSettled([worldBank(code,'SP.POP.TOTL'),worldBank(code,'NY.GDP.MKTP.CD')]);
-metrics=results.map((result,i)=>{if(result.status==='rejected'){errors.push((i?'GDP':'Population')+': '+result.reason.message);return null}return result.value});
+const results=await Promise.allSettled([worldBank(code,'SP.POP.TOTL'),worldBank(code,'NY.GDP.MKTP.CD'),bankCountryMetadata(code)]);
+metrics=results.slice(0,2).map((result,i)=>{if(result.status==='rejected'){errors.push((i?'GDP':'Population')+' unavailable');return null}return result.value});
+if(results[2].status==='fulfilled')bankMeta=results[2].value;
 }else errors.push('No valid ISO country code for World Bank');
 const currencies=basic?.currencies?Object.keys(basic.currencies).join(', '):null;
-const profile={name:basic?.name?.common||c.name,capital:basic?.capital?.join(', ')||null,region:basic?.subregion||basic?.region||null,currency:currencies,population:metrics[0],gdp:metrics[1],errors};
-if(basic||metrics.some(Boolean))profileCache.set(key,profile);return profile
+const profile={name:basic?.name?.common||c.name,capital:basic?.capital?.join(', ')||bankMeta?.capitalCity||null,region:basic?.subregion||basic?.region||bankMeta?.region?.value||null,currency:currencies,population:metrics[0],gdp:metrics[1],errors};
+if(basic||metrics.some(Boolean)||bankMeta)profileCache.set(key,profile);
+return profile
 }
 function profileGrid(p){const grid=document.createElement('div');grid.className='intel-grid';grid.append(field('Capital',p.capital),field('Region',p.region),field('Currency',p.currency),field('Population',p.population?compactNumber(p.population.value):'Unavailable'),field('GDP (current US$)',p.gdp?'$'+compactNumber(p.gdp.value):'Unavailable'),field('Data years',[(p.population?.date?'Population '+p.population.date:null),(p.gdp?.date?'GDP '+p.gdp.date:null)].filter(Boolean).join(' · ')||'Unavailable'));return grid}
 async function renderIntel(c){const request=++profileRequest;intel.replaceChildren(note('Loading public country intelligence…'));comparison.replaceChildren();try{const p=await loadProfile(c);if(request!==profileRequest)return;intel.replaceChildren(profileGrid(p),note('Sources: REST Countries (country details); World Bank Open Data (population and GDP). Latest available reported year, not live estimates.'+(p.errors.length?' Some data unavailable: '+p.errors.join('; '):'')))}catch(e){if(request===profileRequest)intel.replaceChildren(note('Country intelligence unavailable. Retry by selecting the country again.'))}}
